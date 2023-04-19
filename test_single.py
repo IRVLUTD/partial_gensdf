@@ -17,6 +17,71 @@ from tqdm import tqdm
 # remember to add paths in model/__init__.py for new models
 from model import *
 
+from renderer.online_object_renderer import OnlineObjectRenderer
+from utils import utils
+
+
+def set_axes_equal(ax):
+    '''Make axes of 3D plot have equal scale so that spheres appear as spheres,
+    cubes as cubes, etc..  This is one possible solution to Matplotlib's
+    ax.set_aspect('equal') and ax.axis('equal') not working for 3D.
+    Input
+      ax: a matplotlib axis, e.g., as output from plt.gca().
+    '''
+
+    x_limits = ax.get_xlim3d()
+    y_limits = ax.get_ylim3d()
+    z_limits = ax.get_zlim3d()
+
+    x_range = abs(x_limits[1] - x_limits[0])
+    x_middle = np.mean(x_limits)
+    y_range = abs(y_limits[1] - y_limits[0])
+    y_middle = np.mean(y_limits)
+    z_range = abs(z_limits[1] - z_limits[0])
+    z_middle = np.mean(z_limits)
+
+    # The plot bounding box is a sphere in the sense of the infinity
+    # norm, hence I call half the max range the plot radius.
+    plot_radius = 0.5*max([x_range, y_range, z_range])
+
+    ax.set_xlim3d([x_middle - plot_radius, x_middle + plot_radius])
+    ax.set_ylim3d([y_middle - plot_radius, y_middle + plot_radius])
+    ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
+
+
+
+def visualization(pc, pc2, color, depth):
+
+    # visualization for your debugging
+    import matplotlib.pyplot as plt
+    fig = plt.figure()
+        
+    # show RGB image
+    ax = fig.add_subplot(1, 3, 1)
+    if color is not None:
+        plt.imshow(color[:, :, (2, 1, 0)])
+    ax.set_title('RGB image')
+        
+    # show depth image
+    ax = fig.add_subplot(1, 3, 2)
+    if depth is not None:
+        plt.imshow(depth)
+    ax.set_title('depth image')
+        
+    # up to now, suppose you get the points box as pbox. Its shape should be (5280, 3)
+    # then you can use the following code to visualize the points in pbox
+    # You shall see the figure in the homework assignment
+    ax = fig.add_subplot(1, 3, 3, projection='3d')
+    ax.scatter(pc[:, 0], pc[:, 1], pc[:, 2], marker='.', color='r')
+    # ax.scatter(pc2[:, 0], pc2[:, 1], pc2[:, 2], marker='.', color='g')
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    ax.set_title('3D ploud cloud')
+    set_axes_equal(ax)
+                  
+    plt.show()
+
 
 
 def main():
@@ -29,15 +94,46 @@ def main():
     checkpoint = torch.load(resume, map_location=lambda storage, loc: storage)
 
     file_ext = args.file[-4:]
+    pc_size = 5000
     if file_ext == ".csv":
         f = pd.read_csv(args.file, sep=',',header=None).values
         f = f[f[:,-1]==0][:,:3]
+        
+        # set up renderer
+        renderer = OnlineObjectRenderer(caching=True)
+        all_poses = utils.uniform_quaternions()
+    
+        cad_path = args.file.replace('sdf_data.csv', 'model.obj')
+        cad_scale = 1.0
+    
+        viewing_index = np.random.randint(0, high=len(all_poses))
+        camera_pose = all_poses[viewing_index]
+    
+        # read centroid
+        filename = args.file.replace('sdf_data', 'centroid')
+        centroid = pd.read_csv(filename, sep=',',header=None).values
+    
+        color, depth, pc, transferred_pose = renderer.change_and_render(cad_path, cad_scale, centroid, camera_pose)
+        pc = pc.dot(utils.inverse_transform(transferred_pose).T)[:, :3]
+        
+        if pc.shape[0] < pc_size:
+            pc_idx = np.random.choice(pc.shape[0], pc_size)
+        else:
+            pc_idx = np.random.choice(pc.shape[0], pc_size, replace=False)
+        pc = pc[pc_idx]        
+        
     elif file_ext == ".ply":
         f = trimesh.load(args.file).vertices
     else:
         print("add your extension type here! currently not supported...")
         exit()
-
+        
+    # visualization
+    print(pc.shape, f.shape)
+    visualization(pc[::5], f[::20], color, depth)
+    
+    # assign poinsts
+    f = pc.copy()
 
     sampled_points = 15000 # load more points for more accurate reconstruction 
     
