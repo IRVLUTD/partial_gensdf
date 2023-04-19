@@ -11,6 +11,39 @@ import torch.utils.data
 import pandas as pd 
 import csv
 
+from renderer.online_object_renderer import OnlineObjectRenderer
+from utils import utils
+
+
+def visualization(color, depth, pc):
+
+    # visualization for your debugging
+    import matplotlib.pyplot as plt
+    fig = plt.figure()
+        
+    # show RGB image
+    ax = fig.add_subplot(1, 3, 1)
+    plt.imshow(color[:, :, (2, 1, 0)])
+    ax.set_title('RGB image')
+        
+    # show depth image
+    ax = fig.add_subplot(1, 3, 2)
+    plt.imshow(depth)
+    ax.set_title('depth image')
+        
+    # up to now, suppose you get the points box as pbox. Its shape should be (5280, 3)
+    # then you can use the following code to visualize the points in pbox
+    # You shall see the figure in the homework assignment
+    ax = fig.add_subplot(1, 3, 3, projection='3d')
+    ax.scatter(pc[:, 0], pc[:, 1], pc[:, 2], marker='.', color='r')
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    ax.set_title('3D ploud cloud')
+                  
+    plt.show()
+
+
 class Dataset(torch.utils.data.Dataset):
     def __init__(
         self,
@@ -26,6 +59,10 @@ class Dataset(torch.utils.data.Dataset):
         self.split_file = split_file
         self.gt_filename = gt_filename
         #self.pc_size = pc_size
+        
+        # initialize the renderer
+        self.renderer = OnlineObjectRenderer(caching=True)
+        self.all_poses = utils.uniform_quaternions()     
 
         # example
         # data_source: "data"
@@ -38,21 +75,57 @@ class Dataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):     
         return NotImplementedError
-
+        
+        
     def sample_pointcloud(self, csvfile, pc_size):
-        f=pd.read_csv(csvfile, sep=',',header=None).values
+        # f=pd.read_csv(csvfile, sep=',',header=None).values
+        # f = f[f[:,-1]==0][:,:3]
+        
+        # use partial view
+        cad_path = csvfile.replace('sdf_data.csv', 'model.obj')
+        cad_scale = 1.0
+        
+        # read centroid
+        filename = csvfile.replace('sdf_data', 'centroid')
+        centroid = pd.read_csv(filename, sep=',',header=None).values
+        
+        # change object
+        self.renderer.change_object(cad_path, cad_scale, centroid)
+    
+        fail = 0
+        while 1:
+            viewing_index = np.random.randint(0, high=len(self.all_poses))
+            camera_pose = self.all_poses[viewing_index]
+    
+            color, depth, pc, transferred_pose = self.renderer.render(camera_pose)
+            pc = pc.dot(utils.inverse_transform(transferred_pose).T)[:, :3]
+            
+            # add noise
+            # variance = 0.005
+            # pc += np.random.normal(0, np.sqrt(variance), pc.shape)
+            
+            if pc.shape[0] > 200:
+                break
+            else:
+                fail += 1
+                print('fail', fail)
+                
+                if fail > 10:
+                    print(csvfile)
+                    visualization(color, depth, pc)
+        # visualization(color, depth, pc)
 
-        f = f[f[:,-1]==0][:,:3]
-
+        f = pc.copy()
         if f.shape[0] < pc_size:
             pc_idx = np.random.choice(f.shape[0], pc_size)
         else:
             pc_idx = np.random.choice(f.shape[0], pc_size, replace=False)
 
-        return torch.from_numpy(f[pc_idx]).float()
+        return torch.from_numpy(f[pc_idx]).float()        
 
-    def labeled_sampling(self, f, subsample, pc_size=1024):
-        f=pd.read_csv(f, sep=',',header=None).values
+
+    def labeled_sampling(self, csvfile, subsample, pc_size=1024):
+        f=pd.read_csv(csvfile, sep=',',header=None).values
         f = torch.from_numpy(f)
 
         half = int(subsample / 2) 
@@ -71,10 +144,12 @@ class Dataset(torch.utils.data.Dataset):
 
         pos_sample = pos_tensor[pos_idx]
         neg_sample = neg_tensor[neg_idx]
-
-        pc = f[f[:,-1]==0][:,:3]
-        pc_idx = torch.randperm(pc.shape[0])[:pc_size]
-        pc = pc[pc_idx]
+        
+        # sample point cloud
+        # pc = f[f[:,-1]==0][:,:3]
+        # pc_idx = torch.randperm(pc.shape[0])[:pc_size]
+        # pc = pc[pc_idx]
+        pc = self.sample_pointcloud(csvfile, pc_size)        
 
         samples = torch.cat([pos_sample, neg_sample], 0)
 

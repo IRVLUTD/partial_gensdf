@@ -103,7 +103,7 @@ def main():
 
     
     trainer = pl.Trainer(accelerator='gpu', devices=1, precision=16, max_epochs=max_epochs, 
-                        callbacks=callbacks)
+                        callbacks=callbacks, replace_sampler_ddp=False)
     trainer.fit(model=model, ckpt_path=resume) 
 
 

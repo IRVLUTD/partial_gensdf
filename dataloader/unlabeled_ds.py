@@ -13,6 +13,9 @@ from . import base
 import pandas as pd 
 import csv
 
+from renderer.online_object_renderer import OnlineObjectRenderer
+from utils import utils
+
 
 class UnLabeledDS(base.Dataset): 
 
@@ -27,8 +30,8 @@ class UnLabeledDS(base.Dataset):
 
         samples_per_mesh=130000, # 5000*20 from pc, then 30000 from grid 
 
-        load_files=False,
-        save_files=False,
+        load_files=True,
+        save_files=True,
         save_dir = "preprocessed"
     ):
 
@@ -39,8 +42,13 @@ class UnLabeledDS(base.Dataset):
         self.num_iters = int(samples_per_mesh / samples_per_batch)
 
         self.unlab_files = self.get_instance_filenames(data_source, split_file)
+        
+        # initialize the renderer
+        self.renderer = OnlineObjectRenderer(caching=True)
+        self.all_poses = utils.uniform_quaternions()
 
-        if load_files:
+        filename = "{}/prep_data.pt".format(save_dir)
+        if load_files and os.path.exists(filename):
             print("Loading from saved data...")
             prep_data = torch.load("{}/prep_data.pt".format(save_dir))
             self.point_clouds = prep_data["point_cloud"]
@@ -72,13 +80,65 @@ class UnLabeledDS(base.Dataset):
         # # point clouds should just be repeated 
         self.point_clouds = self.point_clouds.unsqueeze(1).repeat(1, self.gt_pt.shape[1], 1, 1)
         print("pc, xyz, pt shapes: ", self.point_clouds.shape, self.sdf_xyz.shape, self.gt_pt.shape)
+        
+        
+    def render_pointcloud(self, csvfile, pc_size):
+
+        # use partial view
+        cad_path = csvfile.replace('sdf_data.csv', 'model.obj')
+        cad_scale = 1.0
+        
+        # read centroid
+        filename = csvfile.replace('sdf_data', 'centroid')
+        centroid = pd.read_csv(filename, sep=',',header=None).values
+        
+        # change object
+        self.renderer.change_object(cad_path, cad_scale, centroid)
+    
+        fail = 0
+        while 1:
+            viewing_index = np.random.randint(0, high=len(self.all_poses))
+            camera_pose = self.all_poses[viewing_index]
+    
+            color, depth, pc, transferred_pose = self.renderer.render(camera_pose)
+            pc = pc.dot(utils.inverse_transform(transferred_pose).T)[:, :3]
+            
+            # add noise
+            # variance = 0.005
+            # pc += np.random.normal(0, np.sqrt(variance), pc.shape)
+            
+            if pc.shape[0] > 200:
+                break
+            else:
+                fail += 1
+                print('fail', fail)
+                
+                if fail > 10:
+                    print(csvfile)
+                    visualization(color, depth, pc)
+        # visualization(color, depth, pc)
+
+        f = pc.copy()
+        if f.shape[0] < pc_size:
+            pc_idx = np.random.choice(f.shape[0], pc_size)
+        else:
+            pc_idx = np.random.choice(f.shape[0], pc_size, replace=False)
+
+        return torch.from_numpy(f[pc_idx]).float()              
            
 
     def __getitem__(self, idx):
+    
+
+        # render partial point cloud
+        csvfile = self.unlab_files[idx[0]]
+        pc = self.render_pointcloud(csvfile, self.pc_size)
+    
         return {
                 "sdf_xyz":self.sdf_xyz[idx].float().squeeze(),
                 "gt_pt":self.gt_pt[idx].float().squeeze(),
-                "point_cloud":self.point_clouds[idx].float().squeeze(),
+                # "point_cloud":self.point_clouds[idx].float().squeeze(),
+                "point_cloud": pc,
                 "indices": idx
         }
 
@@ -104,7 +164,7 @@ class UnLabeledDS(base.Dataset):
             for i, f in enumerate(pbar):
                 pbar.set_description("Files processed: {}/{}".format(i, len(self.unlab_files)))
                 f=pd.read_csv(f, sep=',',header=None).values
-                pc = self.sample_pointcloud(f)  
+                pc = self.sample_pointcloud(f)
                 query_points = self.sample_query(pc) 
 
                 # concat sampled points with grid points 

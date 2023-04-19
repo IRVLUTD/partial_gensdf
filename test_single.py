@@ -73,7 +73,7 @@ def visualization(pc, pc2, color, depth):
     # You shall see the figure in the homework assignment
     ax = fig.add_subplot(1, 3, 3, projection='3d')
     ax.scatter(pc[:, 0], pc[:, 1], pc[:, 2], marker='.', color='r')
-    # ax.scatter(pc2[:, 0], pc2[:, 1], pc2[:, 2], marker='.', color='g')
+    ax.scatter(pc2[:, 0], pc2[:, 1], pc2[:, 2], marker='.', color='g')
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
     ax.set_zlabel('Z')
@@ -89,6 +89,7 @@ def main():
     model = init_model(specs["Model"], specs, 1)
     
     ckpt = "{}.ckpt".format(args.resume) if args.resume=='last' else "epoch={}.ckpt".format(args.resume)
+    print('checkpoint', ckpt)
     resume = os.path.join(args.exp_dir, ckpt)
      
     checkpoint = torch.load(resume, map_location=lambda storage, loc: storage)
@@ -133,7 +134,7 @@ def main():
     visualization(pc[::5], f[::20], color, depth)
     
     # assign poinsts
-    f = pc.copy()
+    # f = pc.copy()
 
     sampled_points = 15000 # load more points for more accurate reconstruction 
     
@@ -144,7 +145,7 @@ def main():
 
     f = torch.from_numpy(f)[torch.randperm(f.shape[0])[0:sampled_points]].float().unsqueeze(0)
     model.load_state_dict(checkpoint['state_dict'])
-    model.reconstruct(model, {'point_cloud':f, 'mesh_name':"loaded_file"}, eval_dir="single_recon", testopt=True, sampled_points=sampled_points) 
+    model.reconstruct(model, {'point_cloud':f, 'mesh_name':"loaded_file"}, eval_dir="single_recon", testopt=False, sampled_points=sampled_points) 
 
 
 def init_model(model, specs, num_objects):

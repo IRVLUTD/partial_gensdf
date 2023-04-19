@@ -18,6 +18,60 @@ from model.archs.decoders.deepsdf_arch import DeepSdfArch
 
 from utils import mesh, evaluate
 
+
+def set_axes_equal(ax):
+    '''Make axes of 3D plot have equal scale so that spheres appear as spheres,
+    cubes as cubes, etc..  This is one possible solution to Matplotlib's
+    ax.set_aspect('equal') and ax.axis('equal') not working for 3D.
+    Input
+      ax: a matplotlib axis, e.g., as output from plt.gca().
+    '''
+
+    x_limits = ax.get_xlim3d()
+    y_limits = ax.get_ylim3d()
+    z_limits = ax.get_zlim3d()
+
+    x_range = abs(x_limits[1] - x_limits[0])
+    x_middle = np.mean(x_limits)
+    y_range = abs(y_limits[1] - y_limits[0])
+    y_middle = np.mean(y_limits)
+    z_range = abs(z_limits[1] - z_limits[0])
+    z_middle = np.mean(z_limits)
+
+    # The plot bounding box is a sphere in the sense of the infinity
+    # norm, hence I call half the max range the plot radius.
+    plot_radius = 0.5*max([x_range, y_range, z_range])
+
+    ax.set_xlim3d([x_middle - plot_radius, x_middle + plot_radius])
+    ax.set_ylim3d([y_middle - plot_radius, y_middle + plot_radius])
+    ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
+
+
+def visualization(pc1, pc2):
+
+    # visualization for your debugging
+    import matplotlib.pyplot as plt
+    fig = plt.figure()
+        
+    # show RGB image
+    ax = fig.add_subplot(1, 2, 1, projection='3d')
+    ax.scatter(pc1[:, 0], pc1[:, 1], pc1[:, 2], marker='.', color='r')
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    ax.set_title('3D ploud cloud')
+    set_axes_equal(ax)
+    
+    ax = fig.add_subplot(1, 2, 2, projection='3d')
+    ax.scatter(pc2[:, 0], pc2[:, 1], pc2[:, 2], marker='.', color='r')
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    ax.set_title('3D ploud cloud') 
+    set_axes_equal(ax)
+    plt.show()
+
+
 class GenSDF(base_pl.Model):
     def __init__(self, specs, dataloaders):
         super().__init__(specs)
@@ -78,6 +132,9 @@ class GenSDF(base_pl.Model):
         query_xyz = query['sdf_xyz']
         #query_gt_sdf = query['gt_sdf'] # pseudo unlabeled for this experiment
         query_gt_pt = query['gt_pt']
+        
+        # print(context_pc.shape, query_pc.shape)
+        # visualization(context_pc.cpu().numpy()[0], query_pc.cpu()[0].numpy())
 
         #print("context xyz, pc shape: ", context_xyz.shape, context_pc.shape)
         #print("query xyz, pc shape: ",query_xyz.shape, query_pc.shape)
