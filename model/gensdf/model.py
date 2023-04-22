@@ -258,6 +258,7 @@ class GenSDF(base_pl.Model):
         with torch.no_grad():
             Path(eval_dir).mkdir(parents=True, exist_ok=True)
             mesh_filename = os.path.join(eval_dir, "reconstruct") #ply extension added in mesh.py
+            print(mesh_filename)
             evaluate_filename = os.path.join("/".join(eval_dir.split("/")[:-2]), "evaluate.csv")
             
             mesh_name = test_data["mesh_name"]
@@ -353,8 +354,3 @@ class GenSDF(base_pl.Model):
         _, min_idx = torch.min(dists, dim=-1)  
         gt_pt = pc[min_idx]
         return xyz.unsqueeze(0), gt_pt.unsqueeze(0)
-
-
-
-    
-

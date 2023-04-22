@@ -4,6 +4,7 @@ import shutil
 import argparse 
 import subprocess
 import numpy as np
+import pandas as pd 
 
 # preprocess functions for ShapeNet data 
 # def get_meshes_dict(split_file):
@@ -57,6 +58,8 @@ def run_sdf_gen(root_dir, class_name):
         args = ("build/sdf_gen",  os.path.join(mesh_folder, "model.obj"), mesh_folder, "|| true")
         popen = subprocess.Popen(args, stderr=subprocess.DEVNULL)
         popen.wait()
+        
+        # sys.exit(1)
 
     # after all csv gt files created, remove those without negative sdv 
     for mesh in mesh_folders:
@@ -64,32 +67,51 @@ def run_sdf_gen(root_dir, class_name):
         if check_neg(csvfile):
             print("removing {} because there are no negative SDV!".format(mesh.split("/")[-1]))
             shutil.rmtree(mesh)
+            
+            
+def check_data(root_dir, class_name):
+    class_dir = os.path.join(root_dir, class_name) # root_dir = acronym; class_name, Plant, Spoon..etc
+
+    meshes = os.listdir(class_dir) # in Plant, Spoon, there are multiple .obj files
+
+    for mesh in meshes:
+        # create folders of the mesh name and move obj, sdf_gt files into the folder 
+        csvfile = os.path.join(class_dir, mesh, 'sdf_data.csv')
+        if not os.path.exists(csvfile):
+            print('file not exists', csvfile)
+            
+        csvfile = os.path.join(class_dir, mesh, 'centroid.csv')
+        if not os.path.exists(csvfile):
+            print('file not exists', csvfile)
+        else:
+            print(csvfile)
+            centroid = pd.read_csv(csvfile, sep=',',header=None).values
+            print(centroid)
 
 
 
 arg_parser = argparse.ArgumentParser()
-#arg_parser.add_argument('--split_file', '-s', default='sv2_sofas_train.json')
-arg_parser.add_argument('--root_dir', '-r', default='../DeepSDF/data/SdfSamples/acronym')
+arg_parser.add_argument('--root_dir', '-r', default='../acronym')
 arg_parser.add_argument('--class_name', '-c', nargs="+")
-#arg_parser.add_argument('--output_dir', '-o', default='../DeepSDF/data/SDFSamples/ShapeNetV2')
-#arg_parser.add_argument('--mkdir', action='store_true')
+
 
 args = arg_parser.parse_args()
 
-if args.class_name == ["all"]:
-    classes = os.listdir(args.root_dir)
-    if ".DS_Store" in classes:
-        classes.remove(".DS_Store")
-    classes.sort()
-    print(classes)
-    # for c in classes:
-    #     print("processing {}".format(c))
-    #     run_sdf_gen(args.root_dir, c)
-    for idx in range(start_idx, len(classes)):
-        print("processing {}".format(classes[idx]))
-        run_sdf_gen(args.root_dir, classes[idx])
 
-else:
-    for c in args.class_name:
-        print("processing {}".format(c))
-        run_sdf_gen(args.root_dir, c)
+classes = os.listdir(args.root_dir)
+if ".DS_Store" in classes:
+    classes.remove(".DS_Store")
+classes.sort()
+for i in range(len(classes)):
+    print(i, classes[i])
+
+s0 = range(0, 60)
+s1 = range(60, 120)
+s2 = range(120, 180)
+s3 = range(180, 240)
+s4 = range(240, len(classes))
+
+for idx in range(len(classes)):
+    print("processing {}".format(classes[idx]))
+    # run_sdf_gen(args.root_dir, classes[idx])
+    check_data(args.root_dir, classes[idx])

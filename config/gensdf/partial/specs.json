@@ -1,7 +1,7 @@
 {
   "Description" : [ "partial gensdf, loading from semi-supervised stage 2 pretrained model..." ],
   "DataSource" : "data",
-  "LabeledTrainSplit" : "data/splits/lab_split.json",
+  "LabeledTrainSplit" : "data/splits/all_split.json",
   "UnLabeledTrainSplit" : "data/splits/unlab_split.json",
   "TestSplit" : "data/splits/unseen_split.json",
   "Model" : "GenSDF",
@@ -35,7 +35,7 @@
   "Alpha":0.1,
 
   "NumEpochs" : 100001,
-  "LogFrequency" : 20,
+  "LogFrequency" : 1,
 
   "LearningRate" : {
     "init" : 1e-4,

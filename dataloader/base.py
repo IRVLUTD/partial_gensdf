@@ -159,6 +159,7 @@ class Dataset(torch.utils.data.Dataset):
     def get_instance_filenames(self, data_source, split, gt_filename="sdf_data.csv"):
             csvfiles = []
             for dataset in split: # e.g. "acronym" "shapenet"
+                print(dataset)
                 for class_name in split[dataset]:
                     for instance_name in split[dataset][class_name]:
                         instance_filename = os.path.join(data_source, dataset, class_name, instance_name, gt_filename)

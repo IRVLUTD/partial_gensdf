@@ -124,7 +124,16 @@ def main():
         pc = pc[pc_idx]        
         
     elif file_ext == ".ply":
-        f = trimesh.load(args.file).vertices
+        vertices = trimesh.load(args.file).vertices
+        print(vertices.shape)
+        
+        pc = vertices.copy()
+        # pc = utils.regularize_pc_point_count(pc, pc_size, use_farthest_point=True)
+        
+        f = pc.copy()
+        color = None
+        depth = None        
+        
     else:
         print("add your extension type here! currently not supported...")
         exit()
@@ -168,7 +177,7 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument(
         "--exp_dir", "-e",
-        default="config/gensdf/semi",
+        default="config/gensdf/partial",
         help="This directory should include experiment specifications in 'specs.json,' and logging will be done in this directory as well.",
     )
     arg_parser.add_argument(
