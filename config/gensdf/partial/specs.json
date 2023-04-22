@@ -1,8 +1,8 @@
 {
   "Description" : [ "partial gensdf, loading from semi-supervised stage 2 pretrained model..." ],
   "DataSource" : "data",
-  "LabeledTrainSplit" : "data/splits/all_split.json",
-  "UnLabeledTrainSplit" : "data/splits/unlab_split.json",
+  "LabeledTrainSplit" : "data/splits/lab_tabletop_split.json",
+  "UnLabeledTrainSplit" : "data/splits/unlab_tabletop_split.json",
   "TestSplit" : "data/splits/unseen_split.json",
   "Model" : "GenSDF",
   "TrainData" : "semi",
