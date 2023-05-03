@@ -39,6 +39,14 @@ class OnlineObjectRenderer:
         self._current_context = None
         self._cache = {} if caching else None
         self._caching = caching
+        self.width = 400
+        self.height = 400
+        
+        fx = self.width / self._fx
+        fy = self.height / self._fy
+        px = self.width / 2
+        py = self.height / 2
+        self.K = np.array([[fx, 0, px], [0, fy, py], [0, 0, 1]])
 
     def _init_scene(self):
         self._scene = pyrender.Scene()
@@ -101,6 +109,19 @@ class OnlineObjectRenderer:
 
     def current_context(self):
         return self._current_context
+        
+        
+    def project_points(self, pc):
+        fx = self.width / self._fx
+        fy = self.height / self._fy
+        px = self.width / 2
+        py = self.height / 2
+        K = np.array([[fx, 0, px], [0, fy, py], [0, 0, 1]])
+        xyz = np.matmul(K, pc[::1000, :3].T)
+        xyz[0, :] = xyz[0, :] / xyz[2, :]
+        xyz[1, :] = xyz[1, :] / xyz[2, :]
+        return xyz[:2, :].T
+        
 
     def _to_pointcloud(self, depth):
         height = depth.shape[0]

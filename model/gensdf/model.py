@@ -7,6 +7,7 @@ import pytorch_lightning as pl
 
 import numpy as np
 import math
+import cv2
 
 import os 
 from pathlib import Path
@@ -70,6 +71,15 @@ def visualization(pc1, pc2):
     ax.set_title('3D ploud cloud') 
     set_axes_equal(ax)
     plt.show()
+    
+    
+def gen_grid(start, end, num):
+    x = np.linspace(start,end,num=num)
+    y = np.linspace(start,end,num=num)
+    z = np.linspace(start,end,num=num)
+    g = np.meshgrid(x,y,z)
+    positions = np.vstack(map(np.ravel, g))
+    return positions.swapaxes(0,1)    
 
 
 class GenSDF(base_pl.Model):
@@ -239,7 +249,7 @@ class GenSDF(base_pl.Model):
 
         return pred_sdf
 
-    def reconstruct(self, model, test_data, eval_dir, testopt=True, sampled_points=15000):
+    def reconstruct(self, model, test_data, eval_dir, testopt=True, sampled_points=15000, depth=None, camera_pose=None, intrinsics=None):
         recon_samplesize_param = 256
         recon_batch = 1000000
 
@@ -250,7 +260,7 @@ class GenSDF(base_pl.Model):
 
         if testopt:
             start_time = time.time()
-            model = self.fast_opt(model, sampled_pc, num_iterations=800)
+            model = self.fast_opt(model, sampled_pc, num_iterations=400, depth=depth, camera_pose=camera_pose, intrinsics=intrinsics)
 
         model.eval() 
         
@@ -270,54 +280,165 @@ class GenSDF(base_pl.Model):
             except Exception as e:
                 print(e)
 
-    def fast_opt(self, model, full_pc, num_iterations=800):
+    def fast_opt(self, model, full_pc, num_iterations=800, depth=None, camera_pose=None, intrinsics=None):
 
         num_iterations = num_iterations
-        xyz_full, gt_pt_full = self.fast_preprocess(full_pc)
+        xyz_full, gt_pt_full = self.fast_preprocess(full_pc)     # xyz_full is the query point set
+        # xyz_full = self.create_grid()     # xyz_full is the query point set
+        
+        # query the model before fine-tuning
+        with torch.no_grad():
+            xyz = xyz_full.cuda()
+            pc = full_pc.cuda()
+            shape_vecs = model.encoder(pc, xyz)
+            decoder_input = torch.cat([shape_vecs, xyz], dim=-1)
+            cache_sdf = model.decoder(decoder_input)
+            print('cache_sdf', cache_sdf.shape)
+        
+        # only use query point in front of the object point cloud
+        if depth is not None:
+            width = depth.shape[1]
+            height = depth.shape[0]
+            n = xyz_full.shape[1]
+            print(xyz_full.shape)
+            query = torch.ones(size=(n, 4), dtype=torch.float32)
+            query[:, :3] = xyz_full[0]
+            pose = torch.from_numpy(camera_pose).float()
+            K = torch.from_numpy(intrinsics).float()
+            # projection
+            points = pose @ query.t()
+            pc_z = points[2, :].numpy()
+            
+            x2d = K @ points[:3, :]
+            x2d[0, :] = x2d[0, :] / x2d[2, :]
+            x2d[1, :] = x2d[1, :] / x2d[2, :]
+            
+            mask = (depth > 0).astype(np.uint8)
+            # erode mask
+            kernel = np.ones((5, 5), np.uint8)
+            mask = cv2.erode(mask, kernel)             
+            
+            min_depth = np.min(depth[depth > 0])
+            print('min depth', min_depth)
+            
+            # keep query points whose depth is smaller than min_depth
+            keep1 = np.where(pc_z < min_depth)[0]
+            print(len(keep1))
+            
+            # check points projected to the object mask
+            pixels = x2d[:2, :].numpy().astype(np.int32)
+            x = pixels[0, :]
+            y = pixels[1, :]
+            inbound = np.where((x >= 0) & (x < width) & (y >=0) & (y < height))[0]
+            pixels_inbound = pixels[:, inbound]
+            mask_inbound = mask[pixels_inbound[1, :], pixels_inbound[0, :]]            
+            depth_inbound = depth[pixels_inbound[1, :], pixels_inbound[0, :]]
+
+            foreground_proj_index = inbound[mask_inbound > 0]
+            foreground_proj_depth = depth_inbound[mask_inbound > 0]
+            
+            points_depth = pc_z[foreground_proj_index]          # depth of the query points in the camera frame
+            # keep query points whose depth is smaller than the observed depth
+            index = points_depth < foreground_proj_depth
+            keep2 = foreground_proj_index[points_depth < foreground_proj_depth]
+            
+            # compute sdf using depth
+            foreground_proj_depth = foreground_proj_depth[index]
+            points_depth = points_depth[index]
+            gt_sdf_selected = foreground_proj_depth - points_depth
+            
+            # total keep
+            # keep = np.unique(np.concatenate((keep1, keep2)))
+            keep = keep2
+            
+            # only keep query points a bit far from object surface
+            index = gt_sdf_selected > 0.05
+            gt_sdf_selected = gt_sdf_selected[index]
+            keep = keep[index]
+            
+            # update cache sdf
+            cache_sdf[keep] = torch.from_numpy(gt_sdf_selected).cuda()
+            xyz_selected = xyz_full[:, keep, :].cuda()
+            gt_pt_selected = gt_pt_full[:, keep, :].cuda()         
+
+            # visualization
+            #'''
+            pixels = x2d.numpy()[:, foreground_proj_index]
+            import matplotlib.pyplot as plt
+            fig = plt.figure()
+            ax = fig.add_subplot(1, 2, 1)
+            plt.imshow(depth)
+            plt.plot(pixels[0, :], pixels[1, :], 'ro')
+            ax.set_title('depth image')
+            
+            ax = fig.add_subplot(1, 2, 2, projection='3d')
+            pc = xyz_full[0, keep].numpy()
+            pc2 = full_pc[0].numpy()
+            print(pc2.shape)
+            ax.scatter(pc[:, 0], pc[:, 1], pc[:, 2], marker='.', color='r')
+            ax.scatter(pc2[:, 0], pc2[:, 1], pc2[:, 2], marker='.', color='g')
+            ax.set_xlabel('X')
+            ax.set_ylabel('Y')
+            ax.set_zlabel('Z')
+            ax.set_title('3D ploud cloud')
+            set_axes_equal(ax)            
+            
+            plt.show()
+            #'''
+
+        
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
         print("performing refinement on input point cloud...")
-        #print("shapes: ", full_pc.shape, xyz_full.shape)
         for e in range(num_iterations):
             samp_idx = torch.randperm(xyz_full.shape[1])[0:5000]
             xyz = xyz_full[ :,samp_idx ].cuda()
-            gt_pt = gt_pt_full[ :,samp_idx ].cuda()
+            gt_sdf = cache_sdf[samp_idx].cuda()
             pc = full_pc[:,torch.randperm(full_pc.shape[1])[0:5000]].cuda()
 
+            # labeled (supervised) loss
             shape_vecs = model.encoder(pc, xyz)
             decoder_input = torch.cat([shape_vecs, xyz], dim=-1)
-            pred_sdf = model.decoder(decoder_input).unsqueeze(-1)
+            pred_sdf = model.decoder(decoder_input).unsqueeze(-1)            
+            labeled_loss = self.labeled_loss(pred_sdf, gt_sdf)
 
+            # self-supervised loss
+            '''
+            selected_vecs = model.encoder(pc, xyz_selected)
+            selected_pred = model.decoder(torch.cat([selected_vecs, xyz_selected], dim=-1)).unsqueeze(-1)
+            pred_pt, gt_pt = model.get_unlab_offset(xyz_selected, gt_pt_selected, selected_pred)
+            unlabeled_loss = nn.MSELoss()(pred_pt, gt_pt)
+            '''
+            
+            # using pc to supervise query as well
+            # ponit cloud sdf loss            
             pc_vecs = model.encoder(pc, pc)
             pc_pred = model.decoder(torch.cat([pc_vecs, pc], dim=-1))
-
-            pred_pt, gt_pt = model.get_unlab_offset(xyz, gt_pt, pred_sdf)
-
-            # loss of pt offset and loss of L1
-            unlabeled_loss = nn.MSELoss()(pred_pt, gt_pt)
-            # using pc to supervise query as well
             pc_l1 = nn.L1Loss()(pc_pred, torch.zeros_like(pc_pred))
 
-            loss = unlabeled_loss + 0.01*pc_l1
+            # loss = unlabeled_loss + 0.01*pc_l1
+            loss = labeled_loss + pc_l1
+            print('iter %d, label loss %.8f, pc loss %.8f' % (e, labeled_loss, pc_l1))
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
         return model
+        
+        
+    def create_grid(self):
+        dot5 = gen_grid(-0.5,0.5, 70) 
+        dot10 = gen_grid(-1.0, 1.0, 50)
+        grid = np.concatenate((dot5,dot10))
+        grid = torch.from_numpy(grid).float()
+        return grid.unsqueeze(0)
+        
 
 
     def fast_preprocess(self, pc):
         pc = pc.squeeze()
         pc_size = pc.shape[0]
         query_per_point=20
-
-        def gen_grid(start, end, num):
-            x = np.linspace(start,end,num=num)
-            y = np.linspace(start,end,num=num)
-            z = np.linspace(start,end,num=num)
-            g = np.meshgrid(x,y,z)
-            positions = np.vstack(map(np.ravel, g))
-            return positions.swapaxes(0,1)
 
         dot5 = gen_grid(-0.5,0.5, 70) 
         dot10 = gen_grid(-1.0, 1.0, 50)
@@ -353,4 +474,9 @@ class GenSDF(base_pl.Model):
         dists = torch.cdist(xyz, pc)
         _, min_idx = torch.min(dists, dim=-1)  
         gt_pt = pc[min_idx]
+        
+        # only use grid points
+        xyz = xyz[pc_size*query_per_point:]
+        gt_pt = gt_pt[pc_size*query_per_point:]
+        
         return xyz.unsqueeze(0), gt_pt.unsqueeze(0)

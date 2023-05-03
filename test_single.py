@@ -50,7 +50,7 @@ def set_axes_equal(ax):
 
 
 
-def visualization(pc, pc2, color, depth):
+def visualization(pc, pc2, color, depth, pixels=None):
 
     # visualization for your debugging
     import matplotlib.pyplot as plt
@@ -66,7 +66,10 @@ def visualization(pc, pc2, color, depth):
     ax = fig.add_subplot(1, 3, 2)
     if depth is not None:
         plt.imshow(depth)
+        if pixels is not None:
+            plt.plot(pixels[:, 0], pixels[:, 1], 'ro')
     ax.set_title('depth image')
+
         
     # up to now, suppose you get the points box as pbox. Its shape should be (5280, 3)
     # then you can use the following code to visualize the points in pbox
@@ -109,12 +112,19 @@ def main():
     
         viewing_index = np.random.randint(0, high=len(all_poses))
         camera_pose = all_poses[viewing_index]
+        # camera_pose = all_poses[1500]
     
         # read centroid
         filename = args.file.replace('sdf_data', 'centroid')
         centroid = pd.read_csv(filename, sep=',',header=None).values
     
         color, depth, pc, transferred_pose = renderer.change_and_render(cad_path, cad_scale, centroid, camera_pose)
+        intrinsics = renderer.K
+        
+        pixels = renderer.project_points(pc)
+        print(transferred_pose.shape)
+        print(pixels.shape)
+        print(pc.shape)
         pc = pc.dot(utils.inverse_transform(transferred_pose).T)[:, :3]
         
         if pc.shape[0] < pc_size:
@@ -132,7 +142,9 @@ def main():
         
         f = pc.copy()
         color = None
-        depth = None        
+        depth = None
+        transferred_pose = None
+        intrinsics = None
         
     else:
         print("add your extension type here! currently not supported...")
@@ -140,10 +152,10 @@ def main():
         
     # visualization
     print(pc.shape, f.shape)
-    visualization(pc[::5], f[::20], color, depth)
+    visualization(pc[::5], f[::20], color, depth, pixels)
     
     # assign poinsts
-    # f = pc.copy()
+    f = pc.copy()
 
     sampled_points = 15000 # load more points for more accurate reconstruction 
     
@@ -154,7 +166,8 @@ def main():
 
     f = torch.from_numpy(f)[torch.randperm(f.shape[0])[0:sampled_points]].float().unsqueeze(0)
     model.load_state_dict(checkpoint['state_dict'])
-    model.reconstruct(model, {'point_cloud':f, 'mesh_name':"loaded_file"}, eval_dir="single_recon", testopt=False, sampled_points=sampled_points) 
+    model.reconstruct(model, {'point_cloud':f, 'mesh_name':"loaded_file"}, eval_dir="single_recon", testopt=True, sampled_points=sampled_points,
+        depth=depth, camera_pose=transferred_pose, intrinsics=intrinsics) 
 
 
 def init_model(model, specs, num_objects):
