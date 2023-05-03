@@ -257,14 +257,7 @@ class GenSDF(base_pl.Model):
         #print("gt pc shape: ",gt_pc.shape)
         sampled_pc = gt_pc[:,torch.randperm(gt_pc.shape[1])[0:15000]]
         #print("sampled pc shape: ",sampled_pc.shape)
-
-        if testopt:
-            start_time = time.time()
-            model = self.fast_opt(model, sampled_pc, num_iterations=400, depth=depth, camera_pose=camera_pose, intrinsics=intrinsics)
-
-        model.eval() 
         
-
         with torch.no_grad():
             Path(eval_dir).mkdir(parents=True, exist_ok=True)
             mesh_filename = os.path.join(eval_dir, "reconstruct") #ply extension added in mesh.py
@@ -273,12 +266,33 @@ class GenSDF(base_pl.Model):
             
             mesh_name = test_data["mesh_name"]
 
-            levelset = 0.005 if testopt else 0.0
+            levelset = 0.0
             mesh.create_mesh(model, sampled_pc, mesh_filename, recon_samplesize_param, recon_batch, level_set=levelset)
             try:
                 evaluate.main(gt_pc, mesh_filename, evaluate_filename, mesh_name) # chamfer distance
             except Exception as e:
                 print(e)
+
+        if testopt:
+            start_time = time.time()
+            model = self.fast_opt(model, sampled_pc, num_iterations=800, depth=depth, camera_pose=camera_pose, intrinsics=intrinsics)
+
+            model.eval() 
+
+            with torch.no_grad():
+                Path(eval_dir).mkdir(parents=True, exist_ok=True)
+                mesh_filename = os.path.join(eval_dir, "reconstruct_finetuned") #ply extension added in mesh.py
+                print(mesh_filename)
+                evaluate_filename = os.path.join("/".join(eval_dir.split("/")[:-2]), "evaluate_finetuned.csv")
+            
+                mesh_name = test_data["mesh_name"]
+                
+                levelset = 0.002 # 0.005
+                mesh.create_mesh(model, sampled_pc, mesh_filename, recon_samplesize_param, recon_batch, level_set=levelset)
+                try:
+                    evaluate.main(gt_pc, mesh_filename, evaluate_filename, mesh_name) # chamfer distance
+                except Exception as e:
+                    print(e)
 
     def fast_opt(self, model, full_pc, num_iterations=800, depth=None, camera_pose=None, intrinsics=None):
 
@@ -403,12 +417,12 @@ class GenSDF(base_pl.Model):
             labeled_loss = self.labeled_loss(pred_sdf, gt_sdf)
 
             # self-supervised loss
-            '''
+            #'''
             selected_vecs = model.encoder(pc, xyz_selected)
             selected_pred = model.decoder(torch.cat([selected_vecs, xyz_selected], dim=-1)).unsqueeze(-1)
             pred_pt, gt_pt = model.get_unlab_offset(xyz_selected, gt_pt_selected, selected_pred)
             unlabeled_loss = nn.MSELoss()(pred_pt, gt_pt)
-            '''
+            #'''
             
             # using pc to supervise query as well
             # ponit cloud sdf loss            
@@ -417,7 +431,7 @@ class GenSDF(base_pl.Model):
             pc_l1 = nn.L1Loss()(pc_pred, torch.zeros_like(pc_pred))
 
             # loss = unlabeled_loss + 0.01*pc_l1
-            loss = labeled_loss + pc_l1
+            loss = labeled_loss + unlabeled_loss + 0.01 * pc_l1
             print('iter %d, label loss %.8f, pc loss %.8f' % (e, labeled_loss, pc_l1))
 
             optimizer.zero_grad()
@@ -476,7 +490,7 @@ class GenSDF(base_pl.Model):
         gt_pt = pc[min_idx]
         
         # only use grid points
-        xyz = xyz[pc_size*query_per_point:]
-        gt_pt = gt_pt[pc_size*query_per_point:]
+        # xyz = xyz[pc_size*query_per_point:]
+        # gt_pt = gt_pt[pc_size*query_per_point:]
         
         return xyz.unsqueeze(0), gt_pt.unsqueeze(0)
