@@ -62,6 +62,12 @@ conda activate sdf
 pip install torch-scatter
 ```
 
+Or
+```bash
+mamba install pytorch-scatter -c pyg
+mamba install -c conda-forge pytorch-lightning h5py easydict
+```
+
 
 ## Demo (for GenSDF)
 Run `test_single.py`. Load a point cloud in csv format (see `data/acronym`) or ply format (see `data/ycb`) and visualize reconstructions.
